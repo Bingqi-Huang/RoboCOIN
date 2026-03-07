@@ -198,7 +198,9 @@ class OpenCVCamera(Camera):
         """
         if not self.is_connected:
             raise DeviceNotConnectedError(f"Cannot configure settings for {self} as it is not connected.")
-
+        # WARNING: this is dubug hardcoded, this camera is the webcam index.
+        if self.index_or_path == 0:
+            self.videocapture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         if self.fps is None:
             self.fps = self.videocapture.get(cv2.CAP_PROP_FPS)
         else:
