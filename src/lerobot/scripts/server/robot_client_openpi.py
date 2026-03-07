@@ -49,6 +49,7 @@ python src/lerobot/scripts/server/robot_client_openpi.py \
 
 """
 
+from collections import deque
 from importlib.util import find_spec
 
 if find_spec("openpi_client") is None:
@@ -93,6 +94,8 @@ class OpenPIRobotClientConfig:
     host: str = "127.0.0.1"
     port: int = 18000
     frequency: int = 10
+    timing_log_interval: int = 10
+    timing_log_window: int = 20
     task: str = "do something"
 
     result_dir: str = "results/"
@@ -169,6 +172,8 @@ class OpenPIRobotClient:
         self.robot = make_robot_from_config(config.robot)
         self.logger.info(f'Initialized robot: {self.robot.name}')
 
+        self._loop_idx = 0
+        self._timing_history: dict[str, deque[float]] = {}
         self._is_finished = False
     
     def start(self):
@@ -178,17 +183,67 @@ class OpenPIRobotClient:
     
     def control_loop(self):
         while not self._is_finished:
-            obs = self._prepare_observation(self.robot.get_observation())
+            loop_start = time.perf_counter()
+
+            stage_start = time.perf_counter()
+            raw_observation = self.robot.get_observation()
+            observation_ms = (time.perf_counter() - stage_start) * 1000
+
+            stage_start = time.perf_counter()
+            obs = self._prepare_observation(raw_observation)
+            prepare_observation_ms = (time.perf_counter() - stage_start) * 1000
+
             # self.logger.info(f'Sent observation: {list(obs.keys())}')
             self.logger.info(f'Prompt: {obs["prompt"]}')
+
+            stage_start = time.perf_counter()
             response = self.policy.infer(obs)
+            infer_ms = (time.perf_counter() - stage_start) * 1000
+
+            stage_start = time.perf_counter()
             actions = self._extract_actions(response)
+            extract_actions_ms = (time.perf_counter() - stage_start) * 1000
+
+            prepare_action_ms = 0.0
+            send_action_ms = 0.0
+            after_action_ms = 0.0
             for action in actions:
+                stage_start = time.perf_counter()
                 action = self._prepare_action(action)
+                prepare_action_ms += (time.perf_counter() - stage_start) * 1000
                 self.logger.info(f'Received action: {action}')
+
+                stage_start = time.perf_counter()
                 self.robot.send_action(action)
+                send_action_ms += (time.perf_counter() - stage_start) * 1000
+
+                stage_start = time.perf_counter()
                 self._after_action()
-            time.sleep(1 / self.config.frequency)
+                after_action_ms += (time.perf_counter() - stage_start) * 1000
+
+            active_loop_ms = (time.perf_counter() - loop_start) * 1000
+
+            sleep_s = 0.0
+            if self.config.frequency > 0:
+                sleep_s = 1 / self.config.frequency
+                time.sleep(sleep_s)
+            total_loop_ms = (time.perf_counter() - loop_start) * 1000
+
+            self._loop_idx += 1
+            self._record_loop_timing(
+                observation_ms=observation_ms,
+                prepare_observation_ms=prepare_observation_ms,
+                infer_ms=infer_ms,
+                extract_actions_ms=extract_actions_ms,
+                prepare_action_ms=prepare_action_ms,
+                send_action_ms=send_action_ms,
+                after_action_ms=after_action_ms,
+                active_loop_ms=active_loop_ms,
+                sleep_ms=sleep_s * 1000,
+                total_loop_ms=total_loop_ms,
+                actions_per_response=float(len(actions)),
+            )
+            self._maybe_log_loop_timing(response)
 
     def stop(self):
         self.logger.info('Stopping robot client...')
@@ -258,6 +313,53 @@ class OpenPIRobotClient:
         if actions.ndim == 1:
             actions = actions[None, :]
         return actions
+
+    def _record_loop_timing(self, **metrics):
+        window = max(1, self.config.timing_log_window)
+        for key, value in metrics.items():
+            history = self._timing_history.setdefault(key, deque(maxlen=window))
+            history.append(float(value))
+
+    def _avg_timing(self, key: str) -> float:
+        values = self._timing_history.get(key)
+        if not values:
+            return 0.0
+        return float(np.mean(values))
+
+    def _maybe_log_loop_timing(self, response):
+        if self.config.timing_log_interval <= 0:
+            return
+        if self._loop_idx % self.config.timing_log_interval != 0:
+            return
+
+        server_timing = response.get("server_timing", {}) if isinstance(response, dict) else {}
+        server_infer_ms = server_timing.get("infer_ms", None)
+        server_prev_total_ms = server_timing.get("prev_total_ms", None)
+
+        total_loop_ms = self._avg_timing("total_loop_ms")
+        active_loop_ms = self._avg_timing("active_loop_ms")
+        total_hz = 1000.0 / total_loop_ms if total_loop_ms > 0 else 0.0
+        active_hz = 1000.0 / active_loop_ms if active_loop_ms > 0 else 0.0
+
+        msg = (
+            f"LoopTiming[{self._loop_idx}] avg/{max(1, self.config.timing_log_window)} | "
+            f"actions={self._avg_timing('actions_per_response'):.2f} | "
+            f"obs={self._avg_timing('observation_ms'):.1f}ms | "
+            f"prep_obs={self._avg_timing('prepare_observation_ms'):.1f}ms | "
+            f"infer={self._avg_timing('infer_ms'):.1f}ms | "
+            f"extract={self._avg_timing('extract_actions_ms'):.1f}ms | "
+            f"prep_act={self._avg_timing('prepare_action_ms'):.1f}ms | "
+            f"send={self._avg_timing('send_action_ms'):.1f}ms | "
+            f"after={self._avg_timing('after_action_ms'):.1f}ms | "
+            f"sleep={self._avg_timing('sleep_ms'):.1f}ms | "
+            f"active={active_loop_ms:.1f}ms ({active_hz:.2f}Hz) | "
+            f"total={total_loop_ms:.1f}ms ({total_hz:.2f}Hz)"
+        )
+        if server_infer_ms is not None:
+            msg += f" | server_infer={float(server_infer_ms):.1f}ms"
+        if server_prev_total_ms is not None:
+            msg += f" | server_prev_total={float(server_prev_total_ms):.1f}ms"
+        self.logger.info(msg)
 
     def _after_action(self):
         obs = self.robot.get_observation()
