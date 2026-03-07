@@ -54,6 +54,7 @@ import time
 import threading
 import traceback
 from dataclasses import dataclass
+from importlib.util import find_spec
 from sshkeyboard import listen_keyboard, stop_listening
 
 import sys
@@ -73,6 +74,10 @@ from lerobot.robots import (
 
 from lerobot.scripts.server.robot_client_openpi import OpenPIRobotClient, OpenPIRobotClientConfig
 from lerobot.scripts.server.annotators.operators import make_operators_pipeline
+
+
+if find_spec("openpi_client") is None:
+    raise ImportError("openpi_client is not installed. Please install it via `pip install openpi-client`.")
 
 
 class KeyboardListener:

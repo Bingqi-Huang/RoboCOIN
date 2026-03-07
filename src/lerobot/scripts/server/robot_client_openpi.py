@@ -49,9 +49,9 @@ python src/lerobot/scripts/server/robot_client_openpi.py \
 
 """
 
-import importlib
+from importlib.util import find_spec
 
-if importlib.util.find_spec("openpi_client") is None:
+if find_spec("openpi_client") is None:
     raise ImportError("openpi_client is not installed. Please install it via `pip install openpi-client`.")
 
 import draccus
@@ -181,7 +181,8 @@ class OpenPIRobotClient:
             obs = self._prepare_observation(self.robot.get_observation())
             # self.logger.info(f'Sent observation: {list(obs.keys())}')
             self.logger.info(f'Prompt: {obs["prompt"]}')
-            actions = self.policy.infer(obs)['action']
+            response = self.policy.infer(obs)
+            actions = self._extract_actions(response)
             for action in actions:
                 action = self._prepare_action(action)
                 self.logger.info(f'Received action: {action}')
@@ -201,8 +202,20 @@ class OpenPIRobotClient:
             observation.pop(key)
         
         state = np.array(state)
+        joint_position = state[:-1].copy()
+        gripper_position = np.array([state[-1]], dtype=state.dtype)
+        joint_velocity = np.zeros_like(joint_position)
 
+        # Emit both RoboCOIN native state and legacy split joint fields.
         observation['observation.state'] = state
+        observation['observation.joint_position'] = joint_position
+        observation['observation.joint_velocity'] = joint_velocity
+        observation['observation.gripper_position'] = gripper_position
+        # Keep both dot and slash observation namespaces for OpenPI server variants.
+        for key, value in list(observation.items()):
+            if key.startswith("observation."):
+                slash_key = key.replace("observation.", "observation/", 1)
+                observation.setdefault(slash_key, value)
         observation['prompt'] = self.config.task
         return observation
     
@@ -211,17 +224,40 @@ class OpenPIRobotClient:
             f"Action length {len(action)} does not match expected {len(self.robot.action_features)}: {self.robot.action_features.keys()}"
         action = np.array(action)
 
-        # 判断gripper值是否小于600，如果是则设为20
-        if action[6] > 1000:
-            action[6] = 1000
-        if action[6] < 300:
-           action[6] = 0
-        if action[-1] > 1000:
-            action[-1] = 1000
-        if action[-1] < 300:
-           action[-1] = 0
+        # Keep the final gripper channel compatible with both legacy 0-1000 commands
+        # and newer binary 0/1 labels used in RM75 collection.
+        if action[-1] > 1.5:
+            action[-1] = np.clip(action[-1], 0, 1000)
+        else:
+            action[-1] = 1.0 if action[-1] > 0.5 else 0.0
 
         return {key: action[i].item() for i, key in enumerate(self.robot.action_features.keys())}
+
+    def _extract_actions(self, response):
+        if isinstance(response, dict):
+            if "action" in response:
+                actions = response["action"]
+            elif "actions" in response:
+                actions = response["actions"]
+            elif "output" in response and isinstance(response["output"], dict):
+                output = response["output"]
+                if "action" in output:
+                    actions = output["action"]
+                elif "actions" in output:
+                    actions = output["actions"]
+                else:
+                    raise KeyError(
+                        f"Expected action payload in response['output'], but got keys: {list(output.keys())}"
+                    )
+            else:
+                raise KeyError(f"Expected 'action' or 'actions' in response, but got keys: {list(response.keys())}")
+        else:
+            actions = response
+
+        actions = np.asarray(actions)
+        if actions.ndim == 1:
+            actions = actions[None, :]
+        return actions
 
     def _after_action(self):
         obs = self.robot.get_observation()
