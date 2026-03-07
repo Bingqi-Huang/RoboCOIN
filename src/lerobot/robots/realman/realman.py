@@ -2,7 +2,7 @@
 Realman robot implementation.
 """
 
-import importlib
+from importlib.util import find_spec
 import numpy as np
 import time
 from ..base_robot import BaseRobot
@@ -22,13 +22,14 @@ class Realman(BaseRobot):
     def __init__(self, config: RealmanConfig) -> None:
         super().__init__(config)
         self.config = config
+        self._last_joint_cmd = None
 
     def _check_dependency(self) -> None:
         """
         Check for dependencies required by the Realman robot.
         Raises ImportError if the required package is not found.
         """
-        if importlib.util.find_spec("Robotic_Arm") is None:
+        if find_spec("Robotic_Arm") is None:
             raise ImportError(
                 "Realman robot requires the Robotic_Arm package. "
                 "Please install it using 'pip install Robotic_Arm'."
@@ -65,15 +66,44 @@ class Realman(BaseRobot):
         - state: np.ndarray of joint positions
         """
         state = list(state)
-        success = self.arm.rm_movej(state[:-1], v=self.config.velocity, r=0, connect=0, block=self.config.block)
+        joint_cmd = np.array(state[:-1], dtype=float)
 
-        if success != 0:
-            raise RuntimeError(f'Failed movej')
+        should_send_joint = True
+        if self._last_joint_cmd is not None and self.config.joint_cmd_threshold_deg > 0:
+            if np.all(np.abs(joint_cmd - self._last_joint_cmd) < self.config.joint_cmd_threshold_deg):
+                should_send_joint = False
+
+        if should_send_joint:
+            if self.config.use_canfd:
+                success = self.arm.rm_movej_canfd(
+                    joint_cmd.tolist(),
+                    self.config.canfd_follow,
+                    self.config.canfd_expand,
+                    self.config.canfd_trajectory_mode,
+                    self.config.canfd_radio,
+                )
+                if success != 0:
+                    raise RuntimeError(
+                        f"Failed movej_canfd: {success}. "
+                        "If canfd_follow=True, ensure control period <= 10ms per SDK docs."
+                    )
+            else:
+                success = self.arm.rm_movej(
+                    joint_cmd.tolist(),
+                    v=self.config.velocity,
+                    r=0,
+                    connect=0,
+                    block=self.config.block,
+                )
+                if success != 0:
+                    raise RuntimeError('Failed movej')
+            self._last_joint_cmd = joint_cmd
+
         success = self.arm.rm_set_gripper_position(int(state[-1]), block=self.config.block, timeout=3)
         if success != 0:
             raise RuntimeError('Failed set gripper')
 
-        if not self.config.block:
+        if should_send_joint and not self.config.block:
             time.sleep(self.config.wait_second)
     
     def _get_joint_state(self) -> np.ndarray:

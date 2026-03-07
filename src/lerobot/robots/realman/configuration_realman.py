@@ -39,6 +39,17 @@ class RealmanConfig(BaseRobotConfig):
     wait_second: float = 0.1
     # Default velocity for joint movements (0-100)
     velocity: int = 30
+    # Motion backend: default keeps current behavior.
+    use_canfd: bool = False
+    # CANFD parameters from official SDK docs.
+    # NOTE: when follow=True, SDK requires passthrough cycle <= 10ms.
+    canfd_follow: bool = False
+    canfd_expand: float = 0.0
+    canfd_trajectory_mode: int = 1
+    canfd_radio: int = 50
+    # Ignore tiny joint command changes (degree) to reduce standstill shaking.
+    # 0 disables thresholding.
+    joint_cmd_threshold_deg: float = 0.0
 
     # Realman robot has 7 joints and a gripper
     joint_names: List[str] = field(default_factory=lambda: [
