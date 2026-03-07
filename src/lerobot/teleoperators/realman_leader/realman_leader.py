@@ -3,6 +3,7 @@ Realman Leader teleoperator class implementation.
 """
 
 import numpy as np
+import json
 from importlib.util import find_spec
 from ..base_leader import BaseLeader
 from .config_realman_leader import RealmanLeaderConfig
@@ -63,6 +64,16 @@ class RealmanLeader(BaseLeader):
             raise RuntimeError(f'Failed to disconnect: {ret_code}')
         self.arm = None
         self.handle = None
+    # Customized method for reading binary gripper state
+    def _read_binary_gripper_cmd(self) -> float:
+        path = self.config.gripper_state_file
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            value = int(data.get("value", 0))
+            return self.config.gripper_close_value if value == 1 else self.config.gripper_open_value
+        except Exception:
+            return self.config.gripper_open_value
     
     def _get_joint_state(self) -> np.ndarray:
         """
@@ -75,11 +86,14 @@ class RealmanLeader(BaseLeader):
         ret_code, joint = self.arm.rm_get_joint_degree()
         if ret_code != 0:
             raise RuntimeError(f'Failed to get joint state: {ret_code}')
-        ret_code, grip = self.arm.rm_get_gripper_state()
-        grip = grip['actpos']
-        if ret_code != 0:
-            raise RuntimeError(f'Failed to get gripper state: {ret_code}')
-        return np.array(joint + [grip])
+        # ret_code, grip = self.arm.rm_get_gripper_state()
+        # grip = grip['actpos']
+        # if ret_code != 0:
+        #     raise RuntimeError(f'Failed to get gripper state: {ret_code}')
+        # return np.array(joint + [grip])
+        grip_cmd = self._read_binary_gripper_cmd()
+        return np.array(joint + [grip_cmd], dtype=float)
+
 
     def _get_ee_state(self) -> np.ndarray:
         """

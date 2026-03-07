@@ -70,6 +70,15 @@ class RealmanConfig(BaseRobotConfig):
         'm', 'm', 'm', 'degree', 'degree', 'degree', 'm',
     ])
 
+    # Customized settings for Realman robot
+    gripper_use_binary_cmd: bool = True
+    gripper_cmd_threshold: float = 0.5
+
+    gripper_close_speed: int = 500
+    gripper_close_force: int = 1000
+
+    gripper_open_speed: int = 500
+
 
 @RobotConfig.register_subclass("realman_end_effector")
 @dataclass

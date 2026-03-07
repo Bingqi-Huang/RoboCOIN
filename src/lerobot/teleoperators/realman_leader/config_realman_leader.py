@@ -51,6 +51,11 @@ class RealmanLeaderConfig(BaseLeaderConfig):
         'm', 'm', 'm', 'degree', 'degree', 'degree', 'm',
     ])
 
+    ##Customized settings for Realman leader##
+    gripper_state_file: str = "/tmp/realman_gripper_state.json"
+    gripper_open_value: float = 0.0
+    gripper_close_value: float = 1.0
+
 
 @TeleoperatorConfig.register_subclass("realman_leader_end_effector")
 @dataclass
