@@ -2,8 +2,8 @@
 Realman Leader teleoperator class implementation.
 """
 
-import importlib
 import numpy as np
+from importlib.util import find_spec
 from ..base_leader import BaseLeader
 from .config_realman_leader import RealmanLeaderConfig
 
@@ -21,13 +21,20 @@ class RealmanLeader(BaseLeader):
     def __init__(self, config: RealmanLeaderConfig) -> None:
         super().__init__(config)
         self.config = config
+
+    @property
+    def is_connected(self) -> bool:
+        """
+        Return the connection status of the Realman robot arm.
+        """
+        return self.arm is not None
     
     def _check_dependency(self) -> None:
         """
         Check for dependencies required by the Realman robot.
         Raises ImportError if the required package is not found.
         """
-        if importlib.util.find_spec("Robotic_Arm") is None:
+        if find_spec("Robotic_Arm") is None:
             raise ImportError(
                 "Realman robot requires the Robotic_Arm package. "
                 "Please install it using 'pip install Robotic_Arm'."
@@ -54,6 +61,8 @@ class RealmanLeader(BaseLeader):
         ret_code = self.arm.rm_destroy()
         if ret_code != 0:
             raise RuntimeError(f'Failed to disconnect: {ret_code}')
+        self.arm = None
+        self.handle = None
     
     def _get_joint_state(self) -> np.ndarray:
         """
