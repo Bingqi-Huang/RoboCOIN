@@ -17,16 +17,24 @@ import time
 
 
 def busy_wait(seconds):
+    if seconds <= 0:
+        return
+
+    end_time = time.perf_counter() + seconds
     if platform.system() == "Darwin" or platform.system() == "Windows":
         # On Mac and Windows, `time.sleep` is not accurate and we need to use this while loop trick,
         # but it consumes CPU cycles.
-        end_time = time.perf_counter() + seconds
         while time.perf_counter() < end_time:
             pass
     else:
-        # On Linux time.sleep is accurate
-        if seconds > 0:
-            time.sleep(seconds)
+        # Hybrid wait on Linux: sleep most of the interval, then spin for the final ~1ms
+        # to reduce consistent overshoot from scheduler wake-up latency.
+        spin_window_s = 0.001
+        sleep_s = seconds - spin_window_s
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+        while time.perf_counter() < end_time:
+            pass
 
 
 def safe_disconnect(func):

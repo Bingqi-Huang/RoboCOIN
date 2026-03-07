@@ -58,6 +58,7 @@ lerobot-record \
 """
 
 import logging
+import math
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -125,6 +126,24 @@ from lerobot.utils.utils import (
 from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
 
 
+def _percentile(values: list[float], q: float) -> float:
+    """Simple percentile helper without extra dependencies."""
+    if not values:
+        return 0.0
+    if q <= 0:
+        return min(values)
+    if q >= 100:
+        return max(values)
+    arr = sorted(values)
+    rank = (len(arr) - 1) * (q / 100.0)
+    low = math.floor(rank)
+    high = math.ceil(rank)
+    if low == high:
+        return arr[low]
+    w = rank - low
+    return arr[low] * (1 - w) + arr[high] * w
+
+
 @dataclass
 class DatasetRecordConfig:
     # Dataset identifier. By convention it should match '{hf_username}/{dataset_name}' (e.g. `lerobot/test`).
@@ -161,6 +180,10 @@ class DatasetRecordConfig:
     # Number of episodes to record before batch encoding videos
     # Set to 1 for immediate encoding (default behavior), or higher for batched encoding
     video_encoding_batch_size: int = 1
+    # Enable per-loop timing logs for performance debugging.
+    profile_loop_timing: bool = False
+    # Print timing summary every N loops when profile_loop_timing=True.
+    profile_loop_timing_every_n: int = 50
 
     def __post_init__(self):
         if self.single_task is None:
@@ -210,6 +233,9 @@ def record_loop(
     control_time_s: int | None = None,
     single_task: str | None = None,
     display_data: bool = False,
+    profile_loop_timing: bool = False,
+    profile_loop_timing_every_n: int = 50,
+    profile_label: str = "loop",
     allow_pause: bool = False,
 ):
     if dataset is not None and dataset.fps != fps:
@@ -236,6 +262,21 @@ def record_loop(
     if policy is not None:
         policy.reset()
 
+    timing_count = 0
+    timing_start_t = time.perf_counter()
+    timing_obs = 0.0
+    timing_action_gen = 0.0
+    timing_send_action = 0.0
+    timing_dataset_add = 0.0
+    timing_work = 0.0
+    timing_loop = 0.0
+    timing_overrun = 0
+    timing_jitter_sum = 0.0
+    timing_jitter_sq_sum = 0.0
+    timing_jitter_abs_sum = 0.0
+    timing_jitter_abs_max = 0.0
+    timing_window_jitter_ms = []
+
     timestamp = 0
     start_episode_t = time.perf_counter()
     events["pause_allowed"] = allow_pause
@@ -259,11 +300,14 @@ def record_loop(
             events["exit_early"] = False
             break
 
+        t0 = time.perf_counter()
         observation = robot.get_observation()
+        obs_dt = time.perf_counter() - t0
 
         if policy is not None or dataset is not None:
             observation_frame = build_dataset_frame(dataset.features, observation, prefix="observation")
 
+        t0 = time.perf_counter()
         if policy is not None:
             action_values = predict_action(
                 observation_frame,
@@ -292,22 +336,87 @@ def record_loop(
                 "The robot won't be at its rest position at the start of the next episode."
             )
             continue
+        action_gen_dt = time.perf_counter() - t0
 
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset.
+        t0 = time.perf_counter()
         sent_action = robot.send_action(action)
+        send_action_dt = time.perf_counter() - t0
 
+        dataset_add_dt = 0.0
         if dataset is not None:
+            t0 = time.perf_counter()
             action_frame = build_dataset_frame(dataset.features, sent_action, prefix="action")
             frame = {**observation_frame, **action_frame}
             # print(frame)
             dataset.add_frame(frame, task=single_task)
+            dataset_add_dt = time.perf_counter() - t0
 
         if display_data:
             log_rerun_data(observation, action)
 
-        dt_s = time.perf_counter() - start_loop_t
-        busy_wait(1 / fps - dt_s)
+        work_dt_s = time.perf_counter() - start_loop_t
+        target_dt_s = 1 / fps
+
+        if profile_loop_timing:
+            timing_count += 1
+            timing_obs += obs_dt
+            timing_action_gen += action_gen_dt
+            timing_send_action += send_action_dt
+            timing_dataset_add += dataset_add_dt
+            timing_work += work_dt_s
+
+        busy_wait(target_dt_s - work_dt_s)
+        loop_dt_s = time.perf_counter() - start_loop_t
+
+        if profile_loop_timing:
+            jitter_s = loop_dt_s - target_dt_s
+            timing_loop += loop_dt_s
+            timing_jitter_sum += jitter_s
+            timing_jitter_sq_sum += jitter_s * jitter_s
+            timing_jitter_abs_sum += abs(jitter_s)
+            timing_jitter_abs_max = max(timing_jitter_abs_max, abs(jitter_s))
+            timing_window_jitter_ms.append(jitter_s * 1000.0)
+
+            if loop_dt_s > target_dt_s:
+                timing_overrun += 1
+
+            if timing_count % profile_loop_timing_every_n == 0:
+                elapsed_s = time.perf_counter() - timing_start_t
+                avg_work_ms = (timing_work / timing_count) * 1000
+                avg_loop_ms = (timing_loop / timing_count) * 1000
+                avg_obs_ms = (timing_obs / timing_count) * 1000
+                avg_action_ms = (timing_action_gen / timing_count) * 1000
+                avg_send_ms = (timing_send_action / timing_count) * 1000
+                avg_add_ms = (timing_dataset_add / timing_count) * 1000
+                achieved_hz = timing_count / elapsed_s if elapsed_s > 0 else 0.0
+                jitter_mean_ms = (timing_jitter_sum / timing_count) * 1000.0
+                # Numerically stable enough here given short runs and ms-level precision.
+                jitter_var_s2 = max((timing_jitter_sq_sum / timing_count) - ((timing_jitter_sum / timing_count) ** 2), 0.0)
+                jitter_std_ms = math.sqrt(jitter_var_s2) * 1000.0
+                jitter_abs_mean_ms = (timing_jitter_abs_sum / timing_count) * 1000.0
+                jitter_abs_p95_ms = _percentile([abs(v) for v in timing_window_jitter_ms], 95.0)
+                jitter_abs_max_ms = timing_jitter_abs_max * 1000.0
+                print(
+                    "[PROFILE] "
+                    f"phase={profile_label} "
+                    f"loops={timing_count} "
+                    f"hz={achieved_hz:.2f} "
+                    f"avg_work={avg_work_ms:.2f}ms "
+                    f"avg_loop={avg_loop_ms:.2f}ms "
+                    f"obs={avg_obs_ms:.2f}ms "
+                    f"action_gen={avg_action_ms:.2f}ms "
+                    f"send_action={avg_send_ms:.2f}ms "
+                    f"dataset_add={avg_add_ms:.2f}ms "
+                    f"jitter_mean={jitter_mean_ms:+.2f}ms "
+                    f"jitter_std={jitter_std_ms:.2f}ms "
+                    f"jitter_abs_mean={jitter_abs_mean_ms:.2f}ms "
+                    f"jitter_abs_p95={jitter_abs_p95_ms:.2f}ms "
+                    f"jitter_abs_max={jitter_abs_max_ms:.2f}ms "
+                    f"overrun={timing_overrun}/{timing_count}"
+                )
+                timing_window_jitter_ms.clear()
 
         timestamp = time.perf_counter() - start_episode_t
 
@@ -372,6 +481,10 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
         control_time_s=cfg.dataset.reset_time_s,
         single_task=cfg.dataset.single_task,
         display_data=cfg.display_data,
+        profile_loop_timing=cfg.dataset.profile_loop_timing,
+        profile_loop_timing_every_n=cfg.dataset.profile_loop_timing_every_n,
+        profile_label="init_reset",
+        allow_pause=True,
     )
 
     with VideoEncodingManager(dataset):
@@ -389,6 +502,10 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 control_time_s=cfg.dataset.episode_time_s,
                 single_task=cfg.dataset.single_task,
                 display_data=cfg.display_data,
+                profile_loop_timing=cfg.dataset.profile_loop_timing,
+                profile_loop_timing_every_n=cfg.dataset.profile_loop_timing_every_n,
+                profile_label="record_episode",
+                allow_pause=False,
             )
 
             # Execute a few seconds without recording to give time to manually reset the environment
@@ -405,6 +522,10 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     control_time_s=cfg.dataset.reset_time_s,
                     single_task=cfg.dataset.single_task,
                     display_data=cfg.display_data,
+                    profile_loop_timing=cfg.dataset.profile_loop_timing,
+                    profile_loop_timing_every_n=cfg.dataset.profile_loop_timing_every_n,
+                    profile_label="between_episode_reset",
+                    allow_pause=True,
                 )
 
             if events["rerecord_episode"]:
