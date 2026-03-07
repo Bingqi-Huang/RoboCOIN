@@ -210,6 +210,7 @@ def record_loop(
     control_time_s: int | None = None,
     single_task: str | None = None,
     display_data: bool = False,
+    allow_pause: bool = False,
 ):
     if dataset is not None and dataset.fps != fps:
         raise ValueError(f"The dataset fps should be equal to requested fps ({dataset.fps} != {fps}).")
@@ -237,7 +238,18 @@ def record_loop(
 
     timestamp = 0
     start_episode_t = time.perf_counter()
+    events["pause_allowed"] = allow_pause
     while timestamp < control_time_s:
+        if allow_pause and events.get("pause_recording", False):
+            pause_t0 = time.perf_counter()
+            while events.get("pause_recording", False) and not events.get("stop_recording", False):
+                time.sleep(0.05)
+            # Do not count paused duration against reset timer budget.
+            start_episode_t += time.perf_counter() - pause_t0
+            if events.get("stop_recording", False):
+                events["exit_early"] = True
+            continue
+
         start_loop_t = time.perf_counter()
 
         if dataset is None:
@@ -411,7 +423,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     if teleop is not None:
         teleop.disconnect()
 
-    if not is_headless() and listener is not None:
+    if listener is not None:
         listener.stop()
 
     if cfg.dataset.push_to_hub:

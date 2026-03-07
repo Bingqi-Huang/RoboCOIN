@@ -18,6 +18,11 @@
 
 
 import logging
+import os
+import select
+import sys
+import threading
+import time
 import traceback
 from contextlib import nullcontext
 from copy import copy
@@ -135,6 +140,98 @@ def predict_action(
     return action
 
 
+def _toggle_pause(events: dict) -> None:
+    if not events.get("pause_allowed", False):
+        print("Pause is only available during reset loops.")
+        return
+    events["pause_recording"] = not events["pause_recording"]
+    if events["pause_recording"]:
+        print("Paused during reset. Press 'p' again to resume.")
+    else:
+        print("Resumed reset loop.")
+
+
+class _TerminalKeyListener:
+    """TTY key listener for headless environments (ssh/tmux)."""
+
+    def __init__(self, events: dict):
+        self.events = events
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+        print(
+            "Terminal controls enabled: "
+            "'s' or RightArrow=save/continue, 'l' or LeftArrow=rerecord, "
+            "'q' or Esc=stop, 'p'=pause(reset only)."
+        )
+
+    def stop(self):
+        self._stop.set()
+        self._thread.join(timeout=0.5)
+
+    def _handle_key(self, key: str) -> None:
+        if key in ("\x1b[C", "s", "S", "r", "R"):
+            print("Save command received. Exiting current loop...")
+            self.events["exit_early"] = True
+        elif key in ("\x1b[D", "l", "L"):
+            print("Rerecord command received. Exiting loop and rerecording the last episode...")
+            self.events["rerecord_episode"] = True
+            self.events["exit_early"] = True
+        elif key in ("\x1b", "q", "Q"):
+            print("Stop command received. Stopping data recording...")
+            self.events["stop_recording"] = True
+            self.events["exit_early"] = True
+        elif key in ("p", "P"):
+            _toggle_pause(self.events)
+
+    def _run(self):
+        if not sys.stdin.isatty():
+            logging.warning("stdin is not a TTY; terminal key controls are disabled.")
+            return
+
+        try:
+            import termios
+            import tty
+        except Exception:
+            logging.warning("termios/tty unavailable; terminal key controls are disabled.")
+            return
+
+        fd = sys.stdin.fileno()
+        old_attrs = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while not self._stop.is_set():
+                ready, _, _ = select.select([fd], [], [], 0.1)
+                if not ready:
+                    continue
+
+                raw = os.read(fd, 1)
+                if not raw:
+                    continue
+
+                key = raw.decode(errors="ignore")
+                if key == "\x1b":
+                    # Decode common escape sequences, e.g. arrows: ESC [ C / ESC [ D
+                    seq = key
+                    for _ in range(2):
+                        ready2, _, _ = select.select([fd], [], [], 0.005)
+                        if not ready2:
+                            break
+                        nxt = os.read(fd, 1)
+                        if not nxt:
+                            break
+                        seq += nxt.decode(errors="ignore")
+                    key = seq
+
+                self._handle_key(key)
+        except Exception as e:
+            logging.warning(f"Terminal key listener stopped due to error: {e}")
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+
+
 def init_keyboard_listener():
     # Allow to exit early while recording an episode or resetting the environment,
     # by tapping the right arrow key '->'. This might require a sudo permission
@@ -143,12 +240,20 @@ def init_keyboard_listener():
     events["exit_early"] = False
     events["rerecord_episode"] = False
     events["stop_recording"] = False
+    events["pause_recording"] = False
+    # Pause is only allowed in reset loops, not during episode recording.
+    events["pause_allowed"] = False
 
     if is_headless():
         logging.warning(
-            "Headless environment detected. On-screen cameras display and keyboard inputs will not be available."
+            "Headless environment detected. Falling back to terminal key controls if TTY is available."
         )
-        listener = None
+        if sys.stdin.isatty():
+            listener = _TerminalKeyListener(events)
+            listener.start()
+        else:
+            logging.warning("stdin is not a TTY. Keyboard control is unavailable in this session.")
+            listener = None
         return listener, events
 
     # Only import pynput if not in a headless environment
@@ -167,6 +272,19 @@ def init_keyboard_listener():
                 print("Escape key pressed. Stopping data recording...")
                 events["stop_recording"] = True
                 events["exit_early"] = True
+            elif hasattr(key, "char") and key.char in ("s", "S", "r", "R"):
+                print("Save command received. Exiting current loop...")
+                events["exit_early"] = True
+            elif hasattr(key, "char") and key.char in ("l", "L"):
+                print("Rerecord command received. Exiting loop and rerecording the last episode...")
+                events["rerecord_episode"] = True
+                events["exit_early"] = True
+            elif hasattr(key, "char") and key.char in ("q", "Q"):
+                print("Stop command received. Stopping data recording...")
+                events["stop_recording"] = True
+                events["exit_early"] = True
+            elif hasattr(key, "char") and key.char in ("p", "P"):
+                _toggle_pause(events)
         except Exception as e:
             print(f"Error handling key press: {e}")
 
