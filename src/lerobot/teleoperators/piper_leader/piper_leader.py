@@ -2,7 +2,7 @@
 Piper leader class implementation.
 """
 
-import importlib
+from importlib.util import find_spec
 import numpy as np
 import time
 
@@ -29,7 +29,7 @@ class PiperLeader(BaseLeader):
         Check if the piper_sdk package is installed.
         Raises ImportError if not installed.
         """
-        if importlib.util.find_spec("piper_sdk") is None:
+        if find_spec("piper_sdk") is None:
             raise ImportError(
                 "Piper robot requires the piper_sdk package. "
                 "Please install it using 'pip install piper_sdk'."

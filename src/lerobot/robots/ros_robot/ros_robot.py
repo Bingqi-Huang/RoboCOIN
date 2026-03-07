@@ -2,7 +2,7 @@
 ROS robot implementation.
 """
 
-import importlib
+from importlib.util import find_spec
 import numpy as np
 
 from ..base_robot import BaseRobot
@@ -29,7 +29,7 @@ class RosRobot(BaseRobot):
         Check for dependencies required by the ROS robot.
         Raises ImportError if the required package is not found.
         """
-        if importlib.util.find_spec("rospy") is None:
+        if find_spec("rospy") is None:
             raise ImportError(
                 "ROS robot requires the rospy package. "
                 "Please install it using 'pip install rospy'."

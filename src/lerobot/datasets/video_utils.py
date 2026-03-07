@@ -14,11 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import glob
-import importlib
 import logging
 import shutil
 import warnings
 from dataclasses import dataclass, field
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -31,7 +31,7 @@ from PIL import Image
 
 
 def get_safe_default_codec():
-    if importlib.util.find_spec("torchcodec"):
+    if find_spec("torchcodec"):
         return "torchcodec"
     else:
         logging.warning(
@@ -187,7 +187,7 @@ def decode_video_frames_torchcodec(
     can be adjusted during encoding to take into account decoding time and video size in bytes.
     """
 
-    if importlib.util.find_spec("torchcodec"):
+    if find_spec("torchcodec"):
         from torchcodec.decoders import VideoDecoder
     else:
         raise ImportError("torchcodec is required but not available.")

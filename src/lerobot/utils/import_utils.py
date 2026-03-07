@@ -15,6 +15,8 @@
 # limitations under the License.
 import importlib
 import logging
+from importlib.metadata import PackageNotFoundError, version
+from importlib.util import find_spec
 
 
 def is_package_available(pkg_name: str, return_version: bool = False) -> tuple[bool, str] | bool:
@@ -22,14 +24,14 @@ def is_package_available(pkg_name: str, return_version: bool = False) -> tuple[b
     Check if the package spec exists and grab its version to avoid importing a local directory.
     **Note:** this doesn't work for all packages.
     """
-    package_exists = importlib.util.find_spec(pkg_name) is not None
+    package_exists = find_spec(pkg_name) is not None
     package_version = "N/A"
     if package_exists:
         try:
             # Primary method to get the package version
-            package_version = importlib.metadata.version(pkg_name)
+            package_version = version(pkg_name)
 
-        except importlib.metadata.PackageNotFoundError:
+        except PackageNotFoundError:
             # Fallback method: Only for "torch" and versions containing "dev"
             if pkg_name == "torch":
                 try:

@@ -2,7 +2,7 @@
 Moveit robot class for controlling the robot using Moveit.
 """
 
-import importlib
+from importlib.util import find_spec
 import numpy as np
 
 from ..base_robot import BaseRobot
@@ -28,12 +28,12 @@ class MoveitRobot(BaseRobot):
         Check if the moveit_commander and rospy packages are installed.
         Raises ImportError if not installed.
         """
-        if importlib.util.find_spec("moveit_commander") is None:
+        if find_spec("moveit_commander") is None:
             raise ImportError(
                 "Moveit robot requires the moveit_commander package. "
                 "Please install it using 'pip install moveit_commander'."
             )
-        if importlib.util.find_spec("rospy") is None:
+        if find_spec("rospy") is None:
             raise ImportError(
                 "Moveit robot requires the rospy package. "
                 "Please install it using 'pip install rospy'."
