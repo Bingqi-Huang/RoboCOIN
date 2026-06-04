@@ -6,7 +6,8 @@
 > 这个客户端是从 `robot_client_openpi.py` fork 来的，**复用了全部机器人控制逻辑**
 > （相机采集、机械臂控制、控制循环、频率、键盘急停、录像），只改了和服务器通信的
 > **数据格式**：发 DreamZero 需要的 3 路命名视图 + 8 维状态，收回 `(N, 8)` 动作块。
-> 所有归一化 / 相对动作解码 / 弧度↔度 / 拼图都在**服务器端**完成，客户端只发原始机器人量。
+> 所有归一化 / 相对动作解码 / 拼图都在**服务器端**完成。单位全程弧度（模型单位）,
+> 硬件度↔弧度由 RoboCOIN 的 realman 机器人类自己处理,client/server 都不转。
 
 ---
 
@@ -73,8 +74,8 @@ uv run python src/lerobot/scripts/server/robot_client_dreamzero.py \
 | `--camera_keys` | 3 个相机键，**按 nominal / c1 / c2 顺序** |
 | `--frequency` | 控制循环频率（Hz） |
 
-> 单位说明：客户端发出去的关节状态是 **度（degree）**、夹爪是机器人原始值，
-> 收回来的动作也是 **度 + 夹爪**，直接下发。服务器负责所有单位/归一化转换。
+> 单位说明：客户端收发的关节都是 **弧度（radian，模型单位）**。RoboCOIN 的 realman
+> 机器人类在 `send_action` 内部把弧度转成硬件的度,所以 client/server 都**不转单位**。
 
 ---
 
@@ -104,6 +105,6 @@ uv run python src/lerobot/scripts/server/robot_client_dreamzero.py \
 只有数据 schema 不同，机器人控制部分完全一致：
 
 - 发出去：`video.nominal_image / video.purturbated_c1_image / video.purturbated_c2_image`
-  （原始相机帧）+ `state.joint_pos`(7, 度) + `state.gripper_pos`(1) + `prompt`。
-- 收回来：`{"actions": (N, 8)}`，即 `[7 关节角(度), 1 夹爪]`，机器人单位。
+  （原始相机帧）+ `state.joint_pos`(7, 弧度) + `state.gripper_pos`(1) + `prompt`。
+- 收回来：`{"actions": (N, 8)}`，即 `[7 关节角(弧度), 1 夹爪]`，模型单位。
 - 没有 openpi 那套 `observation.` / `observation/` 双命名空间，也没有相机键的隐式约定。
