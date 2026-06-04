@@ -25,7 +25,7 @@ Request (client -> server), one dict per control step::
         "video.nominal_image":        np.uint8 (H, W, 3),   # raw camera frame
         "video.purturbated_c1_image": np.uint8 (H, W, 3),
         "video.purturbated_c2_image": np.uint8 (H, W, 3),
-        "state.joint_pos":            np.float (7,),  # joint angles, DEGREES (raw)
+        "state.joint_pos":            np.float (7,),  # joint angles, RADIANS (model units)
         "state.gripper_pos":          np.float (1,),  # gripper, raw robot value
         "prompt":                     str,            # task description
     }
@@ -33,13 +33,14 @@ Request (client -> server), one dict per control step::
 Response (server -> client)::
 
     {
-        "actions":       np.float (N, 8),  # [7 joint DEGREES, 1 gripper], robot units
+        "actions":       np.float (N, 8),  # [7 joint RADIANS, 1 gripper], model units
         "server_timing": {...},            # optional, for logging
     }
 
 The server is responsible for: resizing + assembling the 2x2 training grid,
-deg->rad, normalization, model inference, relative-action decoding (delta +
-current state), and rad->deg. This client just relays raw values.
+normalization, model inference, and relative-action decoding. The RoboCOIN
+Realman robot class already converts hardware degrees <-> radians, so this
+client relays RADIANS (model units) in and out -- no unit conversion here.
 ===================================================================
 
 The three configured ``camera_keys`` are mapped, in order, to
@@ -286,9 +287,9 @@ class DreamZeroRobotClient:
     def _prepare_observation(self, observation):
         """Build the DreamZero-native observation dict.
 
-        Pull the 8-D state (7 joint angles in DEGREES + gripper) from the robot's
+        Pull the 8-D state (7 joint angles in RADIANS + gripper) from the robot's
         motor features, and the 3 named views from the configured camera_keys.
-        Everything is sent in raw robot units; the server does the conversions.
+        get_observation() already returns model units (radians); we relay as-is.
         """
         # State: iterate the robot's motor feature keys in order (joint_*_pos, gripper_pos).
         state = []
@@ -317,9 +318,9 @@ class DreamZeroRobotClient:
     def _prepare_action(self, action):
         """Map an (8,) action row to the robot's action feature dict.
 
-        The server already returns robot units ([7 joint DEGREES, 1 gripper]).
-        We keep the gripper compatible with both binary (0/1) and 0-1000 position
-        commands, matching the Realman robot's gripper handling.
+        The server returns model units ([7 joint RADIANS, 1 gripper]); the robot's
+        send_action() converts radians->degrees for the SDK. We keep the gripper
+        compatible with both binary (0/1) and 0-1000 position commands.
         """
         assert len(action) == len(self.robot.action_features), \
             f"Action length {len(action)} does not match expected {len(self.robot.action_features)}: {list(self.robot.action_features.keys())}"
