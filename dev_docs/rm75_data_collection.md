@@ -494,6 +494,10 @@ uv run scripts/serve_policy.py policy:checkpoint
 
 
 Using can_fd for faster response:
+
+
+
+[ATTENTION!!!!!]use port 8000 for native openpi server and 8001 for the LunarPressure task
 ```bash
 uv run src/lerobot/scripts/server/robot_client_openpi.py \
   --host="192.168.1.166" \
