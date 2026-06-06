@@ -356,7 +356,11 @@ class DreamZeroRobotClient:
         """
         assert len(action) == len(self.robot.action_features), \
             f"Action length {len(action)} does not match expected {len(self.robot.action_features)}: {list(self.robot.action_features.keys())}"
-        action = np.asarray(action)
+        # np.array() (not asarray) forces a writable copy: the action row comes
+        # from the msgpack-deserialized server response, whose backing buffer is
+        # read-only, so the in-place gripper assignment below would otherwise
+        # raise "assignment destination is read-only".
+        action = np.array(action)
 
         if action[-1] > 1.5:
             action[-1] = np.clip(action[-1], 0, 1000)
