@@ -202,6 +202,7 @@ class OpenPIRobotClient:
 
             stage_start = time.perf_counter()
             actions = self._extract_actions(response)
+            # actions = actions[2:5]
             extract_actions_ms = (time.perf_counter() - stage_start) * 1000
 
             prepare_action_ms = 0.0

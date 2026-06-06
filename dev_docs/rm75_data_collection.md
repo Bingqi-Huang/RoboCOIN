@@ -160,13 +160,91 @@ uv run ./src/lerobot/record.py \
  --dataset.push_to_hub=False \
  --dataset.video=True \
  --dataset.fps=20 \
- --dataset.reset_time_s=5 \
- --dataset.episode_time_s=20 \
+ --dataset.reset_time_s=1000 \
+ --dataset.episode_time_s=1000 \
  --dataset.num_image_writer_processes=0 \
  --dataset.num_image_writer_threads_per_camera=2 \
  --dataset.profile_loop_timing=True \
  --dataset.profile_loop_timing_every_n=20
  ```
+
+- Demo Collect with video saved
+```bash
+uv run ./src/lerobot/record.py \
+  --robot.type=realman \
+  --robot.ip="192.168.1.17" \
+  --robot.port=8080 \
+  --robot.init_type="none" \
+  --robot.block=False \
+  --robot.wait_second=0.0 \
+  --robot.visualize=False \
+  --robot.draw_2d=False \
+  --robot.draw_3d=False \
+  --display_data=False \
+  --robot.use_canfd=True \
+  --robot.canfd_follow=False \
+  --robot.canfd_expand=0 \
+  --robot.canfd_trajectory_mode=1 \
+  --robot.canfd_radio=50 \
+  --robot.joint_cmd_threshold_deg=0.05 \
+  --robot.cameras="{scene_image: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, wrist_image: {type: intelrealsense, serial_number_or_name: 243322073824, width: 640, height: 480, fps: 30}}" \
+  --robot.id=rm75_follower \
+  --teleop.type=realman_leader \
+  --teleop.ip="192.168.1.18" \
+  --teleop.port=8080 \
+  --teleop.id=rm75_leader \
+  --teleop.init_type="none" \
+  --robot.velocity=70 \
+  --dataset.repo_id="bingqi/demo" \
+  --dataset.num_episodes=15 \
+  --dataset.single_task="Pick up all non-blue object to cardboard box and blue battery to white container." \
+  --dataset.push_to_hub=False \
+  --dataset.video=True \
+  --dataset.fps=15 \
+  --dataset.reset_time_s=120 \
+  --dataset.episode_time_s=200 \
+  --dataset.num_image_writer_processes=0 \
+  --dataset.num_image_writer_threads_per_camera=2
+```
+
+### Data collection with both realsense cameras
+```
+uv run ./src/lerobot/record.py \
+  --robot.type=realman \
+  --robot.ip="192.168.1.17" \
+  --robot.port=8080 \
+  --robot.init_type="none" \
+  --robot.block=False \
+  --robot.wait_second=0.0 \
+  --robot.visualize=False \
+  --robot.draw_2d=False \
+  --robot.draw_3d=False \
+  --display_data=False \
+  --robot.use_canfd=True \
+  --robot.canfd_follow=False \
+  --robot.canfd_expand=0 \
+  --robot.canfd_trajectory_mode=1 \
+  --robot.canfd_radio=50 \
+  --robot.joint_cmd_threshold_deg=0.05 \
+  --robot.cameras="{scene_image: {type: intelrealsense, serial_number_or_name: 141722078357, width: 640, height: 480, fps: 30}, wrist_image: {type: intelrealsense, serial_number_or_name: 243322073824, width: 640, height: 480, fps: 30}}" \
+  --robot.id=rm75_follower \
+  --teleop.type=realman_leader \
+  --teleop.ip="192.168.1.18" \
+  --teleop.port=8080 \
+  --teleop.id=rm75_leader \
+  --teleop.init_type="none" \
+  --robot.velocity=70 \
+  --dataset.repo_id="bingqi/20260518_valve_task1" \
+  --dataset.num_episodes=48 \
+  --dataset.single_task="Turn the valve clockwise slightly." \
+  --dataset.push_to_hub=False \
+  --dataset.video=True \
+  --dataset.fps=15 \
+  --dataset.reset_time_s=120 \
+  --dataset.episode_time_s=60 \
+  --dataset.num_image_writer_processes=0 \
+  --dataset.num_image_writer_threads_per_camera=2 
+```
 
 - Command for pick 3 (or more) silver DC-DC converters to white container.
 
@@ -374,12 +452,31 @@ uv run src/lerobot/scripts/server/robot_client_openpi.py \
   --robot.canfd_follow=False \
   --robot.wait_second=0.0 \
   --robot.joint_cmd_threshold_deg=0.1 \
-  --robot.velocity=70 \
+  --robot.velocity=95 \
   --robot.cameras="{ observation.scene_image: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, observation.wrist_image: {type: intelrealsense, serial_number_or_name: \"243322073824\", width: 640, height: 480, fps: 30}}" \
   --camera_keys="[ observation.scene_image, observation.wrist_image ]" \
   --robot.id=rm75_follower \
   --frequency=10
 ```
+
+uv run src/lerobot/scripts/server/robot_client_openpi.py \
+  --host="192.168.1.166" \
+  --port=8000 \
+  --task="Pick up all silver cube-like objects with cables" \
+  --robot.type=realman \
+  --robot.ip="192.168.1.17" \
+  --robot.port=8080 \
+  --robot.block=False \
+  --robot.init_type="none" \
+  --robot.use_canfd=True \
+  --robot.canfd_follow=False \
+  --robot.wait_second=0.0 \
+  --robot.joint_cmd_threshold_deg=0.1 \
+  --robot.velocity=80 \
+  --robot.cameras="{ observation.scene_image: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, observation.wrist_image: {type: intelrealsense, serial_number_or_name: \"243322073824\", width: 640, height: 480, fps: 30}}" \
+  --camera_keys="[ observation.scene_image, observation.wrist_image ]" \
+  --robot.id=rm75_follower \
+  --frequency=10
 
 
 *(假设这台 GPU 机器的局域网 IP 是 `192.168.1.100`)*
@@ -387,16 +484,9 @@ uv run src/lerobot/scripts/server/robot_client_openpi.py \
 **2. 在机械臂电脑：启动 RoboCOIN 控制客户端**
 运行一条命令，它就会不停抓取摄像头与关节状态 -> 发向 GPU 服务器 -> 接收动作下发电机执行：
 ```bash
-python scripts/server/robot_client_openpi.py \
-  --host="192.168.1.100" \
-  --port=8000 \
-  --task="wipe the solar panel" \
-  --robot.type=realman \
-  --robot.ip="192.168.1.18" \
-  --robot.port=8080 \
-  --robot.init_type="joint" \
-  --robot.cameras="{ observation.scene_image: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, observation.wrist_image: {type: realsense, index_or_path: 1, width: 640, height: 480, fps: 30}}" \
-  --robot.id=rm75_follower
+uv run scripts/serve_policy.py policy:checkpoint     
+  --policy.config=pi05_rm75_pick_place  \
+  --policy.dir=/home/bingqi/data/admins/bingqi/Projects/openpi-lunarbot/checkpoints/pi05_rm75_pick_place/rm75_pick_place_lora_bs48/15000
 ```
 
 
@@ -418,7 +508,7 @@ uv run src/lerobot/scripts/server/robot_client_openpi.py \
   --robot.canfd_follow=False \
   --robot.wait_second=0.0 \
   --robot.joint_cmd_threshold_deg=0.05 \
-  --robot.velocity=100 \
+  --robot.velocity=85 \
   --robot.cameras="{ observation.scene_image: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, observation.wrist_image: {type: intelrealsense, serial_number_or_name: \"243322073824\", width: 640, height: 480, fps: 30}}" \
   --camera_keys="[ observation.scene_image, observation.wrist_image ]" \
   --robot.id=rm75_follower \
@@ -426,6 +516,28 @@ uv run src/lerobot/scripts/server/robot_client_openpi.py \
   --timing_log_interval=5 \
   --timing_log_window=10
 ```
+
+
+uv run src/lerobot/scripts/server/robot_client_openpi.py \
+  --host="192.168.1.166" \
+  --port=8000 \
+  --task="Pick up the car keys and place them into the cardboard box" \
+  --robot.type=realman \
+  --robot.ip="192.168.1.17" \
+  --robot.port=8080 \
+  --robot.block=False \
+  --robot.init_type="none" \
+  --robot.use_canfd=True \
+  --robot.canfd_follow=False \
+  --robot.wait_second=0.0 \
+  --robot.joint_cmd_threshold_deg=0.05 \
+  --robot.velocity=85 \
+  --robot.cameras="{ observation.scene_image: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, observation.wrist_image: {type: intelrealsense, serial_number_or_name: \"243322073824\", width: 640, height: 480, fps: 30}}" \
+  --camera_keys="[ observation.scene_image, observation.wrist_image ]" \
+  --robot.id=rm75_follower \
+  --frequency=30 \
+  --timing_log_interval=5 \
+  --timing_log_window=10
 
 
 

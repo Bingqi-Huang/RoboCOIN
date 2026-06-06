@@ -159,13 +159,15 @@ class OpenCVCamera(Camera):
         # blocking in multi-threaded applications, especially during data collection.
         cv2.setNumThreads(1)
 
-        self.videocapture = cv2.VideoCapture(self.index_or_path, self.backend)
+        self.videocapture = self._open_video_capture()
 
         if not self.videocapture.isOpened():
             self.videocapture.release()
             self.videocapture = None
             raise ConnectionError(
-                f"Failed to open {self}.Run `lerobot-find-cameras opencv` to find available cameras."
+                f"Failed to open {self}. "
+                f"Run `lerobot-find-cameras opencv` to find available cameras. "
+                f"On Linux, prefer an explicit device path like `/dev/video0` over a numeric index when possible."
             )
 
         self._configure_capture_settings()
@@ -177,6 +179,64 @@ class OpenCVCamera(Camera):
                 time.sleep(0.1)
 
         logger.info(f"{self} connected.")
+
+    def _open_video_capture(self) -> cv2.VideoCapture:
+        """
+        Open the camera with a few Linux-friendly fallbacks.
+
+        Numeric OpenCV indices are unstable on Linux and can fail even when the
+        same camera is reachable via an explicit `/dev/videoX` path.
+        """
+        open_attempts: list[tuple[Any, int | None]] = [(self.index_or_path, self.backend)]
+
+        if platform.system() == "Linux":
+            linux_path = self._linux_device_path()
+            if linux_path is not None:
+                open_attempts.extend(
+                    [
+                        (linux_path, cv2.CAP_V4L2),
+                        (linux_path, cv2.CAP_ANY),
+                    ]
+                )
+                if isinstance(self.index_or_path, int):
+                    open_attempts.append((self.index_or_path, cv2.CAP_V4L2))
+
+        seen: set[tuple[str, int | None]] = set()
+        last_capture: cv2.VideoCapture | None = None
+
+        for source, backend in open_attempts:
+            key = (str(source), backend)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            capture = (
+                cv2.VideoCapture(source)
+                if backend is None
+                else cv2.VideoCapture(source, backend)
+            )
+            if capture.isOpened():
+                logger.info("Opened %s using source=%s backend=%s", self, source, backend)
+                return capture
+
+            capture.release()
+            last_capture = capture
+            logger.warning("Failed to open %s using source=%s backend=%s", self, source, backend)
+
+        return last_capture if last_capture is not None else cv2.VideoCapture()
+
+    def _linux_device_path(self) -> str | None:
+        if isinstance(self.index_or_path, int):
+            return f"/dev/video{self.index_or_path}"
+
+        if isinstance(self.index_or_path, Path):
+            return str(self.index_or_path)
+
+        index_or_path = str(self.index_or_path)
+        if index_or_path.startswith("/dev/video"):
+            return index_or_path
+
+        return None
 
     def _configure_capture_settings(self) -> None:
         """
