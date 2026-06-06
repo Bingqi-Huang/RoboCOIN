@@ -44,21 +44,21 @@ DreamZero 训练用了 **3 路同步相机**，对应三个视图：
 
 ```bash
 uv run python src/lerobot/scripts/server/robot_client_dreamzero.py \
-  --host="192.168.1.166" \
+  --host="192.168.1.240" \
   --port=8000 \
-  --task="Pick up all silver cube-like objects with cables, and place them into the cardboard box" \
+  --task="pick up the blue battery and place it into cardboard box." \
   --robot.type=realman \
   --robot.ip="192.168.1.17" \
   --robot.port=8080 \
   --robot.block=False \
   --robot.use_canfd=True \
   --robot.canfd_follow=False \
-  --robot.velocity=70 \
+  --robot.velocity=15\
   --robot.joint_cmd_threshold_deg=0.1 \
-  --robot.cameras="{ observation.images.nominal_image: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, observation.images.purturbated_c1_image: {type: opencv, index_or_path: 1, width: 640, height: 480, fps: 30}, observation.images.purturbated_c2_image: {type: intelrealsense, serial_number_or_name: \"243322073824\", width: 640, height: 480, fps: 30} }" \
+  --robot.cameras="{nominal_image: {type: intelrealsense, serial_number_or_name: 317222074160, width: 640, height: 480, fps: 15}, purturbated_c1_image: {type: intelrealsense, serial_number_or_name: 141722078357, width: 640, height: 480, fps: 15}, purturbated_c2_image: {type: intelrealsense, serial_number_or_name: 135122074505, width: 640, height: 480, fps: 15}}" \
   --camera_keys="[ observation.images.nominal_image, observation.images.purturbated_c1_image, observation.images.purturbated_c2_image ]" \
   --robot.id=rm75_follower \
-  --frequency=10
+  --frequency=1
 ```
 
 参数说明：

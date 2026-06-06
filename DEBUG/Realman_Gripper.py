@@ -26,9 +26,9 @@ from dataclasses import asdict, dataclass
 
 from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e
 
-
+#PnP task
 RESET_JOINTS_DEG = [0.0, -10.0, 0.0, -53.0, 0.0, -110.0, -240.0]
-
+# Valve task: RESET_JOINTS_DEG = [8.48, -10.754, -44.358, -39.306, 44.202, -50.656, -262.664]
 
 @dataclass
 class SharedState:
