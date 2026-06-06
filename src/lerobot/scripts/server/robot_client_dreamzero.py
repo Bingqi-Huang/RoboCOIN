@@ -215,6 +215,20 @@ class DreamZeroRobotClient:
     def start(self):
         self.keyboard_listener.listen()
         self.logger.info('Starting robot client...')
+        # Start the rollout from the robot's CURRENT pose -- do NOT drive the
+        # arm to a preset init_state on connect. base_robot.connect() only moves
+        # when init_type is 'joint' or 'end_effector'; any other value skips the
+        # move and simply records the current joint state as the init anchor.
+        # This mimics the openpi client (the policy takes over from wherever the
+        # arm already is), and avoids the "weird initial pose" jump the default
+        # init_state ([0,0,0,0]) would otherwise cause.
+        if getattr(self.robot, "config", None) is not None:
+            prev_init_type = getattr(self.robot.config, "init_type", None)
+            self.robot.config.init_type = 'none'
+            self.logger.info(
+                f'Overriding robot init_type {prev_init_type!r} -> \'none\': '
+                f'starting in place (no move-to-init on connect).'
+            )
         self.robot.connect()
 
     def control_loop(self):
@@ -308,12 +322,30 @@ class DreamZeroRobotClient:
 
         # Views: map the 3 configured cameras (in order) to nominal / c1 / c2.
         for cam_key, view_key in zip(self.config.camera_keys, DREAMZERO_VIEW_KEYS):
-            assert cam_key in observation, (
-                f"Expected camera key {cam_key} in observation, but got {list(observation.keys())}"
-            )
-            obs[view_key] = np.asarray(observation[cam_key])
+            resolved = self._resolve_camera_key(observation, cam_key)
+            obs[view_key] = np.asarray(observation[resolved])
 
         return obs
+
+    def _resolve_camera_key(self, observation, cam_key):
+        """Resolve a configured camera key against the robot's observation dict.
+
+        The robot's get_observation() keys frames by the camera dict names, which
+        in practice are the bare view names (e.g. 'nominal_image'), even when
+        camera_keys is configured in the longer 'observation.images.<name>' form.
+        Match the exact key first, then fall back to the basename (last '.'-
+        segment) so both styles work without forcing a specific camera-config
+        naming convention.
+        """
+        if cam_key in observation:
+            return cam_key
+        base = cam_key.rsplit('.', 1)[-1]
+        if base in observation:
+            return base
+        raise KeyError(
+            f"Camera key {cam_key!r} (basename {base!r}) not found in observation; "
+            f"available keys: {list(observation.keys())}"
+        )
 
     def _prepare_action(self, action):
         """Map an (8,) action row to the robot's action feature dict.
@@ -408,7 +440,7 @@ class DreamZeroRobotClient:
 
     def _after_action(self):
         obs = self.robot.get_observation()
-        frames = [obs[key] for key in self.config.camera_keys]
+        frames = [obs[self._resolve_camera_key(obs, key)] for key in self.config.camera_keys]
         self.video_recorder.add(frames)
 
         if self.keyboard_listener._quit:
